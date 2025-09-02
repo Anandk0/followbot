@@ -15,8 +15,12 @@ def main():
 
     # camera
     cap = cv2.VideoCapture(0)  # USB cam; for Picamera2, swap to picamera2 API
+    if not cap.isOpened():
+        print("Error: Could not open camera")
+        return
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg["camera"]["width"])
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg["camera"]["height"])
+    print(f"Camera initialized: {cfg['camera']['width']}x{cfg['camera']['height']}")
 
     det = MoveNetDetector(cfg["model"]["path"], cfg["model"]["input_size"])
     trk = SmoothTracker(alpha=0.35, timeout_ms=cfg["safety"]["no_person_timeout_ms"])
@@ -27,9 +31,15 @@ def main():
 
     last_t = time.time()
     try:
+        frame_count = 0
         while True:
             ok, frame = cap.read()
-            if not ok: continue
+            if not ok: 
+                print("Failed to read frame")
+                continue
+            frame_count += 1
+            if frame_count % 30 == 1:  # Print every 30 frames
+                print(f"Processing frame {frame_count}, shape: {frame.shape}")
             h, w = frame.shape[:2]
 
             # read serial telemetry
@@ -49,7 +59,12 @@ def main():
             left, right, status = ctl.step(bbox, w, yaw, dt)
 
             draw_vis(frame, bbox, status)
-            cv2.imshow("FollowBot", frame)
+            try:
+                cv2.imshow("FollowBot", frame)
+            except cv2.error as e:
+                print(f"OpenCV display error: {e}")
+                print("Running headless - no display available")
+                break
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
     finally:
