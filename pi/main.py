@@ -6,6 +6,12 @@ from pid import PID
 from serial_link import SerialLink
 from control import Controller
 from utils import draw_vis
+try:
+    from picamera2 import Picamera2
+    PICAMERA_AVAILABLE = True
+except ImportError:
+    PICAMERA_AVAILABLE = False
+    print("Picamera2 not available, using OpenCV")
 
 def load_cfg(path):
     with open(path,'r') as f: return yaml.safe_load(f)
@@ -14,13 +20,34 @@ def main():
     cfg = load_cfg("config.yaml")
 
     # camera
-    cap = cv2.VideoCapture(0)  # USB cam; for Picamera2, swap to picamera2 API
-    if not cap.isOpened():
-        print("Error: Could not open camera")
-        return
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg["camera"]["width"])
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg["camera"]["height"])
-    print(f"Camera initialized: {cfg['camera']['width']}x{cfg['camera']['height']}")
+    use_picamera = PICAMERA_AVAILABLE
+    cap = None
+    picam = None
+    
+    if use_picamera:
+        print("Using Picamera2 for Pi camera")
+        try:
+            picam = Picamera2()
+            config = picam.create_preview_configuration(
+                main={"size": (cfg["camera"]["width"], cfg["camera"]["height"])}
+            )
+            picam.configure(config)
+            picam.start()
+            time.sleep(2)  # Let camera warm up
+            print(f"Picamera2 initialized: {cfg['camera']['width']}x{cfg['camera']['height']}")
+        except Exception as e:
+            print(f"Picamera2 failed: {e}")
+            use_picamera = False
+    
+    if not use_picamera:
+        print("Trying OpenCV camera...")
+        cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+        if not cap.isOpened():
+            print("Error: Could not open any camera")
+            return
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg["camera"]["width"])
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg["camera"]["height"])
+        print(f"OpenCV camera configured: {cfg['camera']['width']}x{cfg['camera']['height']}")
 
     det = MoveNetDetector(cfg["model"]["path"], cfg["model"]["input_size"])
     trk = SmoothTracker(alpha=0.35, timeout_ms=cfg["safety"]["no_person_timeout_ms"])
@@ -33,12 +60,20 @@ def main():
     try:
         frame_count = 0
         while True:
-            ok, frame = cap.read()
+            if use_picamera:
+                frame = picam.capture_array()
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)  # Convert RGB to BGR
+                ok = True
+            else:
+                ok, frame = cap.read()
+            
             if not ok: 
                 print("Failed to read frame")
+                time.sleep(0.1)
                 continue
+                
             frame_count += 1
-            if frame_count % 30 == 1:  # Print every 30 frames
+            if frame_count % 30 == 1:
                 print(f"Processing frame {frame_count}, shape: {frame.shape}")
             h, w = frame.shape[:2]
 
@@ -69,7 +104,10 @@ def main():
                 break
     finally:
         link.close()
-        cap.release()
+        if cap:
+            cap.release()
+        if picam:
+            picam.stop()
         cv2.destroyAllWindows()
 
 if __name__ == "__main__":
