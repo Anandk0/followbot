@@ -60,9 +60,37 @@ def main():
         
         while True:
             if use_subprocess:
-                # Skip subprocess approach for now - too complex
-                print("Subprocess method not implemented")
-                break
+                # Read MJPEG frame from subprocess
+                # Look for JPEG start marker (0xFF 0xD8)
+                buffer = b''
+                while True:
+                    chunk = camera_proc.stdout.read(1024)
+                    if not chunk:
+                        break
+                    buffer += chunk
+                    
+                    # Find JPEG start
+                    start = buffer.find(b'\xff\xd8')
+                    if start == -1:
+                        continue
+                        
+                    # Find JPEG end
+                    end = buffer.find(b'\xff\xd9', start + 2)
+                    if end == -1:
+                        continue
+                        
+                    # Extract JPEG frame
+                    jpeg_data = buffer[start:end+2]
+                    buffer = buffer[end+2:]
+                    
+                    # Decode JPEG
+                    frame = cv2.imdecode(np.frombuffer(jpeg_data, dtype=np.uint8), cv2.IMREAD_COLOR)
+                    if frame is not None:
+                        break
+                        
+                if frame is None:
+                    print("Failed to decode MJPEG frame")
+                    continue
             else:
                 # Use GStreamer capture
                 ret, frame = cap.read()
