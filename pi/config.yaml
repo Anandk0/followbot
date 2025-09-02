@@ -1,0 +1,32 @@
+serial:
+  port: "/dev/ttyUSB0"   # adjust after plugging ESP32
+  baud: 115200
+
+model:
+  path: "/home/anandk/followbot/models/movenet_single_pose_lightning.tflite"
+  input_size: 192   # 192x192 for lightning
+
+camera:
+  width: 640
+  height: 480
+  fov_deg: 60.0     # approximate FOV of your camera
+
+control:
+  base_speed: 35       # PWM% abstracted at ESP32 side
+  max_speed: 60
+  angle_gain: 1.0      # scales FOV -> desired yaw
+  align_deadband_deg: 4.0
+  follow_target_px: 260     # target bbox height (distance proxy)
+  follow_kp: 0.20
+  follow_kd: 0.05
+
+pid:
+  kp: 1.2
+  ki: 0.0
+  kd: 0.15
+  out_limit: 70
+
+safety:
+  stop_distance_cm: 30.0
+  no_person_timeout_ms: 800
+
