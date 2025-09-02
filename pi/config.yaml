@@ -1,5 +1,5 @@
 serial:
-  port: "/dev/ttyUSB0"   # adjust after plugging ESP32
+  port: "/dev/ttyUSB0"   # adjust after plugging ESP8266 (Windows: COM3, COM4, etc.)
   baud: 115200
 
 model:
