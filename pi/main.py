@@ -1,4 +1,5 @@
-import cv2, time, yaml, os
+import cv2, time, yaml, os, subprocess, threading
+import numpy as np
 from detector_movenet import MoveNetDetector
 from tracker import SmoothTracker
 from bno055_reader import BNO055Reader
@@ -13,43 +14,23 @@ def load_cfg(path):
 def main():
     cfg = load_cfg("config.yaml")
 
-    # camera - test different approaches
-    cap = None
+    # camera - use libcamera directly
+    print("Starting libcamera stream...")
+    w, h = cfg["camera"]["width"], cfg["camera"]["height"]
     
-    # Try different camera configurations
-    configs = [
-        (0, None),  # Default
-        (0, cv2.CAP_V4L2),  # V4L2 backend
-        (0, cv2.CAP_GSTREAMER),  # GStreamer
-        (1, None),  # Different index
-        (2, None),
+    # Start libcamera process
+    cmd = [
+        'libcamera-vid', '--inline', '--nopreview', 
+        f'--width={w}', f'--height={h}',
+        '--framerate=30', '--timeout=0', '--output=-'
     ]
     
-    for cam_idx, backend in configs:
-        print(f"Trying camera {cam_idx} with backend {backend}")
-        if backend:
-            test_cap = cv2.VideoCapture(cam_idx, backend)
-        else:
-            test_cap = cv2.VideoCapture(cam_idx)
-            
-        if test_cap.isOpened():
-            # Test actual frame capture
-            ret, test_frame = test_cap.read()
-            if ret and test_frame is not None:
-                print(f"SUCCESS: Camera {cam_idx} works! Frame: {test_frame.shape}")
-                cap = test_cap
-                break
-            else:
-                print(f"Camera {cam_idx} opened but no frames")
-        test_cap.release()
-    
-    if cap is None:
-        print("No working camera found")
+    try:
+        camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        print(f"Camera started: {w}x{h}")
+    except Exception as e:
+        print(f"Failed to start libcamera: {e}")
         return
-    
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg["camera"]["width"])
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg["camera"]["height"])
-    print(f"Camera configured: {cfg['camera']['width']}x{cfg['camera']['height']}")
 
     det = MoveNetDetector(cfg["model"]["path"], cfg["model"]["input_size"])
     trk = SmoothTracker(alpha=0.35, timeout_ms=cfg["safety"]["no_person_timeout_ms"])
@@ -61,12 +42,18 @@ def main():
     last_t = time.time()
     try:
         frame_count = 0
+        frame_size = w * h * 3  # RGB bytes per frame
+        
         while True:
-            ok, frame = cap.read()
-            if not ok or frame is None:
-                print("Failed to read frame")
-                time.sleep(0.01)  # Small delay
+            # Read raw frame data from libcamera
+            raw_data = camera_proc.stdout.read(frame_size)
+            if len(raw_data) != frame_size:
+                print("Incomplete frame data")
                 continue
+                
+            # Convert to numpy array and reshape
+            frame = np.frombuffer(raw_data, dtype=np.uint8).reshape((h, w, 3))
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                 
             frame_count += 1
             if frame_count % 30 == 1:
@@ -100,7 +87,8 @@ def main():
                 break
     finally:
         link.close()
-        cap.release()
+        if 'camera_proc' in locals():
+            camera_proc.terminate()
         cv2.destroyAllWindows()
 
 if __name__ == "__main__":
