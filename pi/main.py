@@ -13,16 +13,43 @@ def load_cfg(path):
 def main():
     cfg = load_cfg("config.yaml")
 
-    # camera - using simple approach that works
-    cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg["camera"]["width"])
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg["camera"]["height"])
+    # camera - test different approaches
+    cap = None
     
-    if not cap.isOpened():
-        print("Error: Could not open camera")
+    # Try different camera configurations
+    configs = [
+        (0, None),  # Default
+        (0, cv2.CAP_V4L2),  # V4L2 backend
+        (0, cv2.CAP_GSTREAMER),  # GStreamer
+        (1, None),  # Different index
+        (2, None),
+    ]
+    
+    for cam_idx, backend in configs:
+        print(f"Trying camera {cam_idx} with backend {backend}")
+        if backend:
+            test_cap = cv2.VideoCapture(cam_idx, backend)
+        else:
+            test_cap = cv2.VideoCapture(cam_idx)
+            
+        if test_cap.isOpened():
+            # Test actual frame capture
+            ret, test_frame = test_cap.read()
+            if ret and test_frame is not None:
+                print(f"SUCCESS: Camera {cam_idx} works! Frame: {test_frame.shape}")
+                cap = test_cap
+                break
+            else:
+                print(f"Camera {cam_idx} opened but no frames")
+        test_cap.release()
+    
+    if cap is None:
+        print("No working camera found")
         return
     
-    print(f"Camera initialized: {cfg['camera']['width']}x{cfg['camera']['height']}")
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg["camera"]["width"])
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg["camera"]["height"])
+    print(f"Camera configured: {cfg['camera']['width']}x{cfg['camera']['height']}")
 
     det = MoveNetDetector(cfg["model"]["path"], cfg["model"]["input_size"])
     trk = SmoothTracker(alpha=0.35, timeout_ms=cfg["safety"]["no_person_timeout_ms"])
@@ -36,8 +63,9 @@ def main():
         frame_count = 0
         while True:
             ok, frame = cap.read()
-            if not ok:
+            if not ok or frame is None:
                 print("Failed to read frame")
+                time.sleep(0.01)  # Small delay
                 continue
                 
             frame_count += 1
