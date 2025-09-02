@@ -49,7 +49,18 @@ def main():
 
     det = MoveNetDetector(cfg["model"]["path"], cfg["model"]["input_size"])
     trk = SmoothTracker(alpha=0.35, timeout_ms=cfg["safety"]["no_person_timeout_ms"])
-    bno = BNO055Reader()
+    
+    # Try BNO055, fall back to mock if not connected
+    try:
+        bno = BNO055Reader()
+        print("BNO055 sensor connected")
+    except (ValueError, OSError, RuntimeError) as e:
+        print(f"BNO055 not found: {e}")
+        print("Using mock IMU (yaw=0)")
+        class MockBNO:
+            def yaw_deg(self): return 0.0
+        bno = MockBNO()
+    
     pid = PID(cfg["pid"]["kp"], cfg["pid"]["ki"], cfg["pid"]["kd"], cfg["pid"]["out_limit"])
     link = SerialLink(cfg["serial"]["port"], cfg["serial"]["baud"])
     ctl = Controller(cfg, pid, bno, link)
