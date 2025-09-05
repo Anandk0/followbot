@@ -4,7 +4,7 @@ from detector_movenet import MoveNetDetector
 from tracker import SmoothTracker
 from bno055_reader import BNO055Reader
 from pid import PID
-from gpio_controller import GPIOController
+from motor_driver import MotorDriver
 from control import Controller
 from utils import draw_vis
 
@@ -70,11 +70,11 @@ def main():
         bno = MockBNO()
     pid = PID(cfg["pid"]["kp"], cfg["pid"]["ki"], cfg["pid"]["kd"], cfg["pid"]["out_limit"])
     
-    # Initialize GPIO controller
-    gpio = GPIOController()
-    print("GPIO controller initialized")
+    # Initialize motor driver
+    motors = MotorDriver()
+    print("Motor driver initialized")
     
-    ctl = Controller(cfg, pid, bno, gpio)
+    ctl = Controller(cfg, pid, bno, motors)
 
     last_t = time.time()
     try:
@@ -126,9 +126,7 @@ def main():
                 print(f"Processing frame {frame_count}, shape: {frame.shape}")
             h, w = frame.shape[:2]
 
-            # read GPIO telemetry
-            rx = gpio.get_telemetry()
-            if rx: ctl.handle_rx(rx)
+            # no telemetry needed for direct motor control
 
             # detection
             d = det.infer(frame)
@@ -152,7 +150,7 @@ def main():
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
     finally:
-        gpio.cleanup()
+        motors.close()
         if 'cap' in locals() and cap.isOpened():
             cap.release()
         if 'camera_proc' in locals():

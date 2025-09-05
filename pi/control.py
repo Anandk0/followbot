@@ -3,11 +3,11 @@ import math, time
 def clamp(v, lo, hi): return lo if v < lo else hi if v > hi else v
 
 class Controller:
-    def __init__(self, cfg, pid_yaw, bno, gpio):
+    def __init__(self, cfg, pid_yaw, bno, motors):
         self.cfg = cfg
         self.pid = pid_yaw
         self.bno = bno
-        self.gpio = gpio
+        self.motors = motors
         self.last_obstacle_cm = None
         self.last_rx_ts = 0
 
@@ -26,11 +26,22 @@ class Controller:
         left = int(clamp(left, -100, 100))
         right = int(clamp(right, -100, 100))
         print(f"Motor command: L={left}, R={right}")
-        self.gpio.set_motor_speeds(left, right)
+        
+        # Convert to motor commands
+        if left > 0 and right > 0:
+            self.motors.send({'action': 'forward', 'speed': (left + right) // 2})
+        elif left < 0 and right < 0:
+            self.motors.send({'action': 'backward', 'speed': abs((left + right) // 2)})
+        elif left > 0 and right <= 0:
+            self.motors.send({'action': 'right', 'speed': abs(left)})
+        elif left <= 0 and right > 0:
+            self.motors.send({'action': 'left', 'speed': abs(right)})
+        else:
+            self.motors.send({'action': 'stop'})
 
     def stop(self):
         print("STOP command")
-        self.gpio.stop_motors()
+        self.motors.send({'action': 'stop'})
 
     def step(self, bbox, img_w, yaw_deg, dt):
         """

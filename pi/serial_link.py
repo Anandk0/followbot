@@ -43,6 +43,7 @@ class SerialLink:
                     try:
                         obj = json.loads(line.decode("utf-8", errors="ignore"))
                         self.rx_q.put(obj)
+                        print(f"[SerialLink] RECV: {obj}")
                     except Exception as e:
                         # keep debug info but don't crash
                         print(f"[SerialLink] rx json parse err: {e} raw={line!r}")
@@ -66,6 +67,7 @@ class SerialLink:
         try:
             self.ser.write(line)
             self.ser.flush()
+            print(f"[SerialLink] SENT: {obj}")
         except Exception as e:
             print(f"[SerialLink] write error: {e} -- attempting reconnect")
             try:
