@@ -3,11 +3,11 @@ import math, time
 def clamp(v, lo, hi): return lo if v < lo else hi if v > hi else v
 
 class Controller:
-    def __init__(self, cfg, pid_yaw, bno, link):
+    def __init__(self, cfg, pid_yaw, bno, gpio):
         self.cfg = cfg
         self.pid = pid_yaw
         self.bno = bno
-        self.link = link
+        self.gpio = gpio
         self.last_obstacle_cm = None
         self.last_rx_ts = 0
 
@@ -23,14 +23,14 @@ class Controller:
         return self.last_obstacle_cm < self.cfg["safety"]["stop_distance_cm"]
 
     def drive_raw(self, left, right):
-        cmd = {"cmd":"set_speed","left": int(clamp(left,-100,100)),
-               "right": int(clamp(right,-100,100))}
-        print(f"Sending motor command: {cmd}")
-        self.link.send(cmd)
+        left = int(clamp(left, -100, 100))
+        right = int(clamp(right, -100, 100))
+        print(f"Motor command: L={left}, R={right}")
+        self.gpio.set_motor_speeds(left, right)
 
     def stop(self):
-        print("Sending STOP command")
-        self.link.send({"cmd":"stop"})
+        print("STOP command")
+        self.gpio.stop_motors()
 
     def step(self, bbox, img_w, yaw_deg, dt):
         """

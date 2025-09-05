@@ -4,7 +4,7 @@ from detector_movenet import MoveNetDetector
 from tracker import SmoothTracker
 from bno055_reader import BNO055Reader
 from pid import PID
-from serial_link import SerialLink
+from gpio_controller import GPIOController
 from control import Controller
 from utils import draw_vis
 
@@ -70,21 +70,11 @@ def main():
         bno = MockBNO()
     pid = PID(cfg["pid"]["kp"], cfg["pid"]["ki"], cfg["pid"]["kd"], cfg["pid"]["out_limit"])
     
-    # Try serial connection, fall back to mock if not available
-    try:
-        link = SerialLink(cfg["serial"]["port"], cfg["serial"]["baud"])
-        print(f"Serial connected to {cfg['serial']['port']}")
-    except Exception as e:
-        print(f"Serial failed: {e}")
-        print("Using mock serial connection")
-        class MockSerial:
-            def send(self, obj): 
-                print(f"MOCK SERIAL: Would send {obj}")
-            def recv_nowait(self): return None
-            def close(self): pass
-        link = MockSerial()
+    # Initialize GPIO controller
+    gpio = GPIOController()
+    print("GPIO controller initialized")
     
-    ctl = Controller(cfg, pid, bno, link)
+    ctl = Controller(cfg, pid, bno, gpio)
 
     last_t = time.time()
     try:
@@ -136,8 +126,8 @@ def main():
                 print(f"Processing frame {frame_count}, shape: {frame.shape}")
             h, w = frame.shape[:2]
 
-            # read serial telemetry
-            rx = ctl.link.recv_nowait()
+            # read GPIO telemetry
+            rx = gpio.get_telemetry()
             if rx: ctl.handle_rx(rx)
 
             # detection
@@ -162,7 +152,7 @@ def main():
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
     finally:
-        link.close()
+        gpio.cleanup()
         if 'cap' in locals() and cap.isOpened():
             cap.release()
         if 'camera_proc' in locals():

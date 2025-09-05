@@ -1,6 +1,13 @@
-serial:
-  port: "/dev/ttyUSB0"   # adjust after plugging ESP8266 (Linux: /dev/ttyUSB0, /dev/ttyACM0)
-  baud: 115200
+# GPIO pins (BCM numbering) - no serial needed
+gpio:
+  motor_l1: 18
+  motor_l2: 19
+  motor_r1: 20
+  motor_r2: 21
+  motor_l_pwm: 12
+  motor_r_pwm: 13
+  trig_pin: 23
+  echo_pin: 24
 
 model:
   path: "../models/movenet_single_pose_lightning.tflite"
