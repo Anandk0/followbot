@@ -78,7 +78,8 @@ def main():
         print(f"Serial failed: {e}")
         print("Using mock serial connection")
         class MockSerial:
-            def send(self, obj): pass
+            def send(self, obj): 
+                print(f"MOCK SERIAL: Would send {obj}")
             def recv_nowait(self): return None
             def close(self): pass
         link = MockSerial()
