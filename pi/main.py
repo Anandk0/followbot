@@ -28,18 +28,29 @@ def main():
     cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
     
     if not cap.isOpened():
-        print("Failed to open GStreamer pipeline, trying default camera...")
-        # Fallback to default camera (Windows compatible)
-        cap = cv2.VideoCapture(0)
-        if cap.isOpened():
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
-            cap.set(cv2.CAP_PROP_FPS, 30)
-            print(f"Using default camera: {w}x{h}")
-            use_subprocess = False
-        else:
-            print("No camera available")
-            return
+        print("Failed to open GStreamer pipeline, trying rpicam-vid...")
+        # Fallback to rpicam-vid for Raspberry Pi
+        cmd = [
+            'rpicam-vid', '--inline', '--nopreview',
+            f'--width={w}', f'--height={h}',
+            '--framerate=30', '--timeout=0',
+            '--codec=mjpeg', '--output=-'
+        ]
+        try:
+            camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+            print(f"Using rpicam-vid: {w}x{h}")
+            use_subprocess = True
+        except Exception as e:
+            print(f"rpicam-vid failed, trying default camera: {e}")
+            cap = cv2.VideoCapture(0)
+            if cap.isOpened():
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+                print(f"Using default camera: {w}x{h}")
+                use_subprocess = False
+            else:
+                print("No camera available")
+                return
     else:
         print(f"GStreamer camera started: {w}x{h}")
         use_subprocess = False
@@ -58,7 +69,20 @@ def main():
             def yaw_deg(self): return 0.0
         bno = MockBNO()
     pid = PID(cfg["pid"]["kp"], cfg["pid"]["ki"], cfg["pid"]["kd"], cfg["pid"]["out_limit"])
-    link = SerialLink(cfg["serial"]["port"], cfg["serial"]["baud"])
+    
+    # Try serial connection, fall back to mock if not available
+    try:
+        link = SerialLink(cfg["serial"]["port"], cfg["serial"]["baud"])
+        print(f"Serial connected to {cfg['serial']['port']}")
+    except Exception as e:
+        print(f"Serial failed: {e}")
+        print("Using mock serial connection")
+        class MockSerial:
+            def send(self, obj): pass
+            def recv_nowait(self): return None
+            def close(self): pass
+        link = MockSerial()
+    
     ctl = Controller(cfg, pid, bno, link)
 
     last_t = time.time()
@@ -67,11 +91,44 @@ def main():
         frame = None
         
         while True:
-            # Use camera capture (simplified)
-            ret, frame = cap.read()
-            if not ret or frame is None:
-                print("Failed to read frame from camera")
-                continue
+            if use_subprocess:
+                # Read MJPEG frame from rpicam-vid
+                buffer = b''
+                frame = None
+                while True:
+                    chunk = camera_proc.stdout.read(1024)
+                    if not chunk:
+                        break
+                    buffer += chunk
+                    
+                    # Find JPEG start
+                    start = buffer.find(b'\xff\xd8')
+                    if start == -1:
+                        continue
+                        
+                    # Find JPEG end
+                    end = buffer.find(b'\xff\xd9', start + 2)
+                    if end == -1:
+                        continue
+                        
+                    # Extract JPEG frame
+                    jpeg_data = buffer[start:end+2]
+                    buffer = buffer[end+2:]
+                    
+                    # Decode JPEG
+                    frame = cv2.imdecode(np.frombuffer(jpeg_data, dtype=np.uint8), cv2.IMREAD_COLOR)
+                    if frame is not None:
+                        break
+                        
+                if frame is None:
+                    print("Failed to decode MJPEG frame")
+                    continue
+            else:
+                # Use camera capture
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    print("Failed to read frame from camera")
+                    continue
                     
             frame_count += 1
             if frame_count % 30 == 1:
@@ -107,7 +164,12 @@ def main():
         link.close()
         if 'cap' in locals() and cap.isOpened():
             cap.release()
-        # Camera cleanup handled by cap.release()
+        if 'camera_proc' in locals():
+            try:
+                camera_proc.terminate()
+                camera_proc.wait(timeout=5)
+            except:
+                camera_proc.kill()
         cv2.destroyAllWindows()
 
 if __name__ == "__main__":
