@@ -12,15 +12,13 @@ class Controller:
         self.last_rx_ts = 0
 
     def handle_rx(self, msg):
-        # expected: {"telemetry":{"distance_cm":xx.x,"bat_v":x.x}}
+        # expected: {"telemetry":{"bat_v":x.x}}
         tele = msg.get("telemetry")
-        if tele and "distance_cm" in tele:
-            self.last_obstacle_cm = float(tele["distance_cm"])
+        if tele:
             self.last_rx_ts = time.time()
 
     def obstacle_blocked(self):
-        if self.last_obstacle_cm is None: return False
-        return self.last_obstacle_cm < self.cfg["safety"]["stop_distance_cm"]
+        return False  # No ultrasonic sensor
 
     def drive_raw(self, left, right):
         cmd = {"cmd":"set_speed","left": int(clamp(left,-100,100)),
@@ -45,7 +43,7 @@ class Controller:
         # safety first
         if self.obstacle_blocked():
             self.stop()
-            return (0,0,f"STOP obstacle {self.last_obstacle_cm:.1f}cm")
+            return (0,0,"STOP obstacle detected")
 
         if bbox is None or yaw_deg is None:
             self.stop()
