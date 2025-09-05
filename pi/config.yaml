@@ -1,5 +1,5 @@
 serial:
-  port: "/dev/ttyUSB0"   # adjust after plugging ESP8266 (Windows: COM3, COM4, etc.)
+  port: "/dev/ttyUSB1"   # try USB1 if USB0 is busy
   baud: 115200
 
 model:

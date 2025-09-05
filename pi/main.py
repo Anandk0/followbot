@@ -1,5 +1,15 @@
-import cv2, time, yaml, os, subprocess, threading
+import cv2, time, yaml, os, subprocess, threading, signal
 import numpy as np
+
+# Handle camera process cleanup
+def signal_handler(signum, frame):
+    print("\nShutting down gracefully...")
+    if 'camera_proc' in globals():
+        camera_proc.terminate()
+    exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 from detector_movenet import MoveNetDetector
 from tracker import SmoothTracker
 from bno055_reader import BNO055Reader
@@ -37,7 +47,7 @@ def main():
             '--codec=mjpeg', '--output=-'
         ]
         try:
-            camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+            camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             print(f"Using rpicam-vid: {w}x{h}")
             use_subprocess = True
         except Exception as e:
@@ -61,7 +71,26 @@ def main():
             def yaw_deg(self): return 0.0
         bno = MockBNO()
     pid = PID(cfg["pid"]["kp"], cfg["pid"]["ki"], cfg["pid"]["kd"], cfg["pid"]["out_limit"])
-    link = SerialLink(cfg["serial"]["port"], cfg["serial"]["baud"])
+    
+    # Try serial connection with fallbacks
+    serial_ports = [cfg["serial"]["port"], "/dev/ttyUSB0", "/dev/ttyACM0"]
+    link = None
+    for port in serial_ports:
+        try:
+            link = SerialLink(port, cfg["serial"]["baud"])
+            print(f"Serial connected on {port}")
+            break
+        except Exception as e:
+            print(f"Failed to connect to {port}: {e}")
+    
+    if not link:
+        print("No serial connection - running in camera-only mode")
+        class MockSerial:
+            def send(self, data): pass
+            def recv_nowait(self): return None
+            def close(self): pass
+        link = MockSerial()
+    
     ctl = Controller(cfg, pid, bno, link)
 
     last_t = time.time()
