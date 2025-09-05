@@ -23,10 +23,13 @@ class Controller:
         return self.last_obstacle_cm < self.cfg["safety"]["stop_distance_cm"]
 
     def drive_raw(self, left, right):
-        self.link.send({"cmd":"set_speed","left": int(clamp(left,-100,100)),
-                        "right": int(clamp(right,-100,100))})
+        cmd = {"cmd":"set_speed","left": int(clamp(left,-100,100)),
+               "right": int(clamp(right,-100,100))}
+        print(f"Sending motor command: {cmd}")
+        self.link.send(cmd)
 
     def stop(self):
+        print("Sending STOP command")
         self.link.send({"cmd":"stop"})
 
     def step(self, bbox, img_w, yaw_deg, dt):
