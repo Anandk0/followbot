@@ -8,7 +8,9 @@
 #define MOTOR_L_PWM 14 // D5
 #define MOTOR_R_PWM 12 // D6
 
-// Ultrasonic pins removed
+// Ultrasonic pins
+#define TRIG_PIN 13   // D7
+#define ECHO_PIN 15   // D8
 
 unsigned long lastTelemetry = 0;
 
@@ -23,7 +25,9 @@ void setup() {
   pinMode(MOTOR_L_PWM, OUTPUT);
   pinMode(MOTOR_R_PWM, OUTPUT);
   
-  // Ultrasonic pins removed
+  // Ultrasonic pins
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
   
   stopMotors();
 }
@@ -31,13 +35,11 @@ void setup() {
 void loop() {
   handleSerial();
   
-  // Send telemetry every 500ms to prevent buffer overflow
-  if (millis() - lastTelemetry > 500) {
+  // Send telemetry every 100ms
+  if (millis() - lastTelemetry > 100) {
     sendTelemetry();
     lastTelemetry = millis();
   }
-  
-  delay(10); // Small delay to prevent overwhelming serial
 }
 
 void handleSerial() {
@@ -97,12 +99,24 @@ void stopMotors() {
   analogWrite(MOTOR_R_PWM, 0);
 }
 
-void sendTelemetry() {
-  DynamicJsonDocument doc(64);
-  doc["telemetry"]["bat_v"] = 3.3;
+float getDistance() {
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
   
-  Serial.flush();
+  long duration = pulseIn(ECHO_PIN, HIGH, 30000); // 30ms timeout
+  if (duration == 0) return 999.0; // No echo
+  
+  return (duration * 0.034) / 2.0; // Convert to cm
+}
+
+void sendTelemetry() {
+  DynamicJsonDocument doc(128);
+  doc["telemetry"]["distance_cm"] = getDistance();
+  doc["telemetry"]["bat_v"] = 3.3; // Placeholder
+  
   serializeJson(doc, Serial);
   Serial.println();
-  Serial.flush();
 }

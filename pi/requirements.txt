@@ -2,6 +2,4 @@ opencv-python==4.8.1.78
 numpy==1.24.3
 PyYAML==6.0.1
 pyserial==3.5
-adafruit-circuitpython-bno055==5.4.7
-adafruit-blinka==8.22.2
 tensorflow==2.13.0

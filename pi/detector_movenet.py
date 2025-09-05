@@ -1,4 +1,8 @@
-import numpy as np, cv2, tflite_runtime.interpreter as tflite
+import numpy as np, cv2
+try:
+    import tflite_runtime.interpreter as tflite
+except ImportError:
+    import tensorflow.lite as tflite
 
 class MoveNetDetector:
     def __init__(self, model_path:str, input_size:int=192):
