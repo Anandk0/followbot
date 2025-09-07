@@ -1,6 +1,6 @@
 # ESP8266 Serial Communication
 esp8266:
-  port: "/dev/ttyUSB0"  # Adjust for your system (Windows: COM3, COM4, etc.)
+  port: "/dev/ttyUSB0"  # Try: /dev/ttyUSB0, /dev/ttyACM0, /dev/ttyAMA0
   baud: 115200
   timeout: 1.0
 

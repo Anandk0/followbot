@@ -1,4 +1,4 @@
-import cv2, time, yaml, os, subprocess, threading
+import cv2, time, yaml, os, subprocess, threading, signal
 import numpy as np
 from detector_movenet import MoveNetDetector
 from tracker import SmoothTracker
@@ -70,7 +70,7 @@ def main():
         bno = MockBNO()
     pid = PID(cfg["pid"]["kp"], cfg["pid"]["ki"], cfg["pid"]["kd"], cfg["pid"]["out_limit"])
     
-    # Initialize ESP8266 motor driver
+    # Initialize motor driver with fallback
     esp_cfg = cfg.get("esp8266", {})
     port = esp_cfg.get("port", "/dev/ttyUSB0")
     baud = esp_cfg.get("baud", 115200)
@@ -80,11 +80,14 @@ def main():
         if motors.is_connected():
             print(f"ESP8266 motor driver connected on {port}")
         else:
-            print(f"Failed to connect to ESP8266 on {port}")
-            return
+            raise ConnectionError("ESP8266 not responding")
     except Exception as e:
         print(f"ESP8266 connection failed: {e}")
-        return
+        print("Using mock motor driver")
+        class MockMotorDriver:
+            def send(self, cmd): print(f"MOCK MOTOR: {cmd}")
+            def close(self): pass
+        motors = MockMotorDriver()
     
     ctl = Controller(cfg, pid, bno, motors)
 
@@ -101,9 +104,10 @@ def main():
                 while True:
                     try:
                         chunk = camera_proc.stdout.read(1024)
-                        if not chunk:
+                        if not chunk or camera_proc.poll() is not None:
                             break
-                    except Exception:
+                    except (BrokenPipeError, OSError):
+                        print("Camera process terminated")
                         break
                     buffer += chunk
                     
@@ -128,6 +132,9 @@ def main():
                         
                 if frame is None:
                     print("Failed to decode MJPEG frame")
+                    if camera_proc.poll() is not None:
+                        print("Camera process died, exiting")
+                        break
                     continue
             else:
                 # Use camera capture
@@ -141,7 +148,10 @@ def main():
                 print(f"Processing frame {frame_count}, shape: {frame.shape}")
             h, w = frame.shape[:2]
 
-            # no telemetry needed for direct motor control
+            # Process frame
+            if frame is None:
+                print("No frame available")
+                continue
 
             # detection
             d = det.infer(frame)
@@ -158,24 +168,25 @@ def main():
             draw_vis(frame, bbox, status)
             try:
                 cv2.imshow("FollowBot", frame)
-            except cv2.error as e:
-                print(f"OpenCV display error: {e}")
-                print("Running headless - no display available")
-                break
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+            except cv2.error:
+                # Running headless - continue without display
+                pass
+
     finally:
         motors.close()
         if 'cap' in locals() and cap.isOpened():
             cap.release()
-        if 'camera_proc' in locals():
+        if 'camera_proc' in locals() and camera_proc:
             try:
-                camera_proc.terminate()
-                try:
-                    camera_proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    camera_proc.kill()
-                    camera_proc.wait()
+                if camera_proc.poll() is None:  # Process still running
+                    camera_proc.terminate()
+                    try:
+                        camera_proc.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        camera_proc.kill()
+                        camera_proc.wait()
             except (subprocess.TimeoutExpired, ProcessLookupError) as e:
                 print(f"Camera cleanup error: {e}")
         cv2.destroyAllWindows()
