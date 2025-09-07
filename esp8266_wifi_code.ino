@@ -75,6 +75,7 @@ void handleRoot() {
 void handleMotor() {
   if (server.hasArg("plain")) {
     String body = server.arg("plain");
+    Serial.println("Received: " + body);
     DynamicJsonDocument doc(1024);
     
     if (deserializeJson(doc, body) == DeserializationError::Ok) {
@@ -118,13 +119,25 @@ void handleStatus() {
 }
 
 void setMotorSpeeds(int left, int right) {
+  Serial.print("Motor speeds: L="); Serial.print(left); Serial.print(", R="); Serial.println(right);
+  
+  // Apply minimum speed threshold (motors need at least 25% to move)
+  int leftPWM = 0, rightPWM = 0;
+  
+  if (abs(left) > 0) {
+    leftPWM = map(abs(left), 0, 100, 300, 1023);  // Min 300 (~30%) for movement
+  }
+  if (abs(right) > 0) {
+    rightPWM = map(abs(right), 0, 100, 300, 1023);  // Min 300 (~30%) for movement
+  }
+  
   // Left motor
   if (left > 0) {
     digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
-    analogWrite(ENA, map(abs(left), 0, 100, 0, 1023));
+    analogWrite(ENA, leftPWM);
   } else if (left < 0) {
     digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
-    analogWrite(ENA, map(abs(left), 0, 100, 0, 1023));
+    analogWrite(ENA, leftPWM);
   } else {
     digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
     analogWrite(ENA, 0);
@@ -133,10 +146,10 @@ void setMotorSpeeds(int left, int right) {
   // Right motor
   if (right > 0) {
     digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
-    analogWrite(ENB, map(abs(right), 0, 100, 0, 1023));
+    analogWrite(ENB, rightPWM);
   } else if (right < 0) {
     digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
-    analogWrite(ENB, map(abs(right), 0, 100, 0, 1023));
+    analogWrite(ENB, rightPWM);
   } else {
     digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
     analogWrite(ENB, 0);

@@ -21,8 +21,8 @@ camera:
   fov_deg: 60.0     # approximate FOV of your camera
 
 control:
-  base_speed: 35       # PWM% abstracted at ESP8266 side
-  max_speed: 60
+  base_speed: 50       # PWM% abstracted at ESP8266 side
+  max_speed: 80
   angle_gain: 1.0      # scales FOV -> desired yaw
   align_deadband_deg: 4.0
   follow_target_px: 260     # target bbox height (distance proxy)
