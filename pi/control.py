@@ -11,13 +11,8 @@ class Controller:
         self.last_obstacle_cm = None
         self.last_rx_ts = 0
         
-        # State machine for stop-assess-center-move
-        self.state = "ASSESS"  # ASSESS, CENTERING, MOVING
+        # Simple tracking
         self.last_bbox_center = None
-        self.centering_start_time = 0
-        self.assess_start_time = 0
-        self.stable_frames = 0
-        self.target_stable = False
 
     def _process_distance_telemetry(self, telem_data):
         """Process distance telemetry data"""
@@ -71,7 +66,7 @@ class Controller:
 
     def step(self, bbox, img_w, yaw_deg, dt):
         """
-        State machine: ASSESS -> CENTERING -> MOVING
+        Fast control with centering priority
         bbox: (x,y,w,h) or None
         returns (left,right,status_str)
         """
@@ -82,17 +77,14 @@ class Controller:
         maxs = self.cfg["control"]["max_speed"]
         fov = self.cfg["camera"]["fov_deg"]
         dead = self.cfg["control"]["align_deadband_deg"]
-        current_time = time.time()
 
         # Safety first
         if self.obstacle_blocked():
             self.stop()
-            self.state = "ASSESS"
             return (0,0,f"STOP obstacle {self.last_obstacle_cm:.1f}cm")
 
         if bbox is None or yaw_deg is None:
             self.stop()
-            self.state = "ASSESS"
             return (0,0,"NO TARGET or NO IMU")
 
         x,y,w,h = bbox
@@ -104,85 +96,33 @@ class Controller:
         if err > 180: err -= 360
         if err < -180: err += 360
 
-        # Check if target moved significantly
-        if self.last_bbox_center is not None:
-            center_diff = abs(cx - self.last_bbox_center)
-            if center_diff > 50:  # Target moved significantly
-                self.state = "ASSESS"
-                self.stable_frames = 0
-        
-        self.last_bbox_center = cx
+        u = self.pid.step(err, dt)
         
         # Distance check
         tgt_h = self.cfg["control"]["follow_target_px"]
         if h >= tgt_h:  # Too close
-            self.stop()
-            return (0,0,f"TOO_CLOSE h={h}")
+            left = -base*0.4
+            right = -base*0.4
+            status = f"BACKOFF h={h}"
+        elif abs(err) <= dead:  # Well centered
+            # Move forward with minimal correction
+            left = base - u*0.1
+            right = base + u*0.1
+            status = f"FORWARD centered"
+        elif abs(err) <= 25:  # Slightly off-center
+            # Gentle turn while moving
+            left = base*0.6 - u*0.6
+            right = base*0.6 + u*0.6
+            status = f"GENTLE_TURN err={err:.1f}"
+        else:  # Way off-center - prioritize turning
+            left = -u*0.8
+            right = u*0.8
+            status = f"TURN_ONLY err={err:.1f}"
         
-        # State machine logic
-        if self.state == "ASSESS":
-            # Stop and assess for 0.5 seconds
-            if not hasattr(self, 'assess_start_time') or self.assess_start_time == 0:
-                self.assess_start_time = current_time
-            
-            self.stop()
-            
-            if current_time - self.assess_start_time > 0.5:
-                if abs(err) <= dead:
-                    self.state = "MOVING"
-                    status = "ASSESS->MOVING (already centered)"
-                else:
-                    self.state = "CENTERING"
-                    self.centering_start_time = current_time
-                    status = f"ASSESS->CENTERING err={err:.1f}"
-                self.assess_start_time = 0
-            else:
-                status = f"ASSESSING err={err:.1f}"
-            
-            return (0, 0, status)
-            
-        elif self.state == "CENTERING":
-            # Turn in place to center on target
-            if abs(err) <= dead:
-                # Successfully centered
-                self.stable_frames += 1
-                if self.stable_frames >= 3:  # Stay centered for 3 frames
-                    self.state = "MOVING"
-                    self.stable_frames = 0
-                    return (0, 0, "CENTERED->MOVING")
-            else:
-                self.stable_frames = 0
-            
-            # Timeout check - don't center forever
-            if current_time - self.centering_start_time > 3.0:
-                self.state = "MOVING"
-                return (0, 0, "CENTERING_TIMEOUT->MOVING")
-            
-            # Pure rotation to center
-            turn_speed = clamp(abs(err) * 1.5, 25, 50)  # Proportional turning
-            if err > 0:  # Turn right
-                left, right = turn_speed, -turn_speed
-            else:  # Turn left
-                left, right = -turn_speed, turn_speed
-            
-            self.drive_raw(left, right)
-            return (left, right, f"CENTERING err={err:.1f}")
-            
-        elif self.state == "MOVING":
-            # Move forward while maintaining center
-            if abs(err) > dead * 2:  # Lost alignment significantly
-                self.state = "ASSESS"
-                return (0, 0, "LOST_ALIGNMENT->ASSESS")
-            
-            # Move forward with gentle corrections
-            u = self.pid.step(err, dt)
-            left = clamp(base - u*0.2, 0, maxs)  # Gentle correction
-            right = clamp(base + u*0.2, 0, maxs)
-            
-            self.drive_raw(left, right)
-            return (left, right, f"MOVING err={err:.1f}")
-        
-        # Fallback
-        self.stop()
-        return (0, 0, "UNKNOWN_STATE")
+        # Apply limits
+        left = clamp(left, -maxs, maxs)
+        right = clamp(right, -maxs, maxs)
+
+        self.drive_raw(left, right)
+        return (left, right, status)
 

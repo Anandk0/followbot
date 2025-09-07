@@ -17,28 +17,29 @@ def load_cfg(path):
     with open(path,'r') as f: return yaml.safe_load(f)
 
 def setup_camera(cfg):
-    """Setup camera using libcamera-vid (most reliable)"""
-    w, h = cfg["camera"]["width"], cfg["camera"]["height"]
+    """Setup camera for maximum speed"""
+    # Force low resolution for speed
+    w, h = 320, 240
     
-    # Use libcamera-vid directly (most reliable for Pi camera)
+    # Try OpenCV first (fastest)
+    cap = cv2.VideoCapture(0)
+    if cap.isOpened():
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+        cap.set(cv2.CAP_PROP_FPS, 30)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        print(f"Using OpenCV camera: {w}x{h}@30fps")
+        return cap, None, False
+    
+    # Fast libcamera-vid setup
     cmd = ['libcamera-vid', '--inline', '--nopreview', f'--width={w}', f'--height={h}', 
-           '--framerate=20', '--timeout=0', '--codec=mjpeg', '--output=-', '--flush']
+           '--framerate=30', '--timeout=0', '--codec=mjpeg', '--output=-']
     try:
         camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        print(f"Using libcamera-vid: {w}x{h}")
+        print(f"Using fast libcamera-vid: {w}x{h}@30fps")
         return None, camera_proc, True
     except Exception as e:
         print(f"libcamera-vid failed: {e}")
-    
-    # Fallback to rpicam-vid
-    cmd = ['rpicam-vid', '--inline', '--nopreview', f'--width={w}', f'--height={h}', 
-           '--framerate=20', '--timeout=0', '--codec=mjpeg', '--output=-']
-    try:
-        camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        print(f"Using rpicam-vid: {w}x{h}")
-        return None, camera_proc, True
-    except Exception as e:
-        print(f"rpicam-vid failed: {e}")
     
     raise RuntimeError("No camera available")
 
