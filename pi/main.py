@@ -17,31 +17,19 @@ def load_cfg(path):
     with open(path,'r') as f: return yaml.safe_load(f)
 
 def setup_camera(cfg):
-    """Setup camera for maximum speed"""
-    # Force low resolution for speed
+    """Simple camera setup using libcamera-vid"""
     w, h = 320, 240
     
-    # Try OpenCV first (fastest)
-    cap = cv2.VideoCapture(0)
-    if cap.isOpened():
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
-        cap.set(cv2.CAP_PROP_FPS, 30)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        print(f"Using OpenCV camera: {w}x{h}@30fps")
-        return cap, None, False
-    
-    # Fast libcamera-vid setup
+    # Use libcamera-vid (most reliable)
     cmd = ['libcamera-vid', '--inline', '--nopreview', f'--width={w}', f'--height={h}', 
-           '--framerate=30', '--timeout=0', '--codec=mjpeg', '--output=-']
+           '--framerate=25', '--timeout=0', '--codec=mjpeg', '--output=-']
     try:
-        camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        print(f"Using fast libcamera-vid: {w}x{h}@30fps")
+        camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        print(f"Camera started: {w}x{h}@25fps")
         return None, camera_proc, True
     except Exception as e:
-        print(f"libcamera-vid failed: {e}")
-    
-    raise RuntimeError("No camera available")
+        print(f"Camera failed: {e}")
+        raise RuntimeError("Camera not available")
 
 def main():
     cfg = load_cfg("config.yaml")
@@ -140,10 +128,10 @@ def main():
                     print(f"Failed to decode MJPEG frame (errors: {camera_error_count})")
                     if camera_proc.poll() is not None or camera_error_count > 10:
                         print("Camera process died or too many errors, attempting restart")
-                        if time.time() - last_restart > 3:  # Restart more frequently
+                        if time.time() - last_restart > 5:  # Don't restart too often
                             try:
                                 camera_proc.terminate()
-                                camera_proc.wait(timeout=1)
+                                camera_proc.wait(timeout=2)
                             except:
                                 try:
                                     camera_proc.kill()
@@ -163,14 +151,8 @@ def main():
                 if not ret or frame is None:
                     camera_error_count += 1
                     print(f"Failed to read frame from camera (errors: {camera_error_count})")
-                    if camera_error_count > 3:
-                        print("Too many camera errors, attempting restart")
-                        if time.time() - last_restart > 3:
-                            if cap:
-                                cap.release()
-                            cap, camera_proc, use_subprocess = setup_camera(cfg)
-                            camera_error_count = 0
-                            last_restart = time.time()
+                    # OpenCV not used anymore
+                    pass
                     time.sleep(0.1)
                     continue
                 else:
