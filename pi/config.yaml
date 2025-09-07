@@ -1,3 +1,4 @@
+---
 # ESP8266 Communication
 esp8266:
   # Serial (old method)
@@ -8,7 +9,7 @@ esp8266:
   
   # WiFi (new method)
   use_wifi: true
-  ip: "192.168.1.100"  # Update with your ESP8266 IP
+  ip: "10.163.221.143"  # ESP8266 IP matching your network
 
 model:
   path: "../models/movenet_single_pose_lightning.tflite"
