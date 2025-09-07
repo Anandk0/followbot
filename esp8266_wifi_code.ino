@@ -131,24 +131,24 @@ void setMotorSpeeds(int left, int right) {
     rightPWM = map(abs(right), 0, 100, 300, 1023);  // Min 300 (~30%) for movement
   }
   
-  // Left motor
+  // Left motor (reversed)
   if (left > 0) {
-    digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+    digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
     analogWrite(ENA, leftPWM);
   } else if (left < 0) {
-    digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+    digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
     analogWrite(ENA, leftPWM);
   } else {
     digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
     analogWrite(ENA, 0);
   }
   
-  // Right motor
+  // Right motor (reversed)
   if (right > 0) {
-    digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+    digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
     analogWrite(ENB, rightPWM);
   } else if (right < 0) {
-    digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+    digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
     analogWrite(ENB, rightPWM);
   } else {
     digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
