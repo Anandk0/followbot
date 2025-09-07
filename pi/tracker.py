@@ -12,20 +12,24 @@ class SmoothTracker:
         self.last_ms = 0
 
     def update(self, det):
-        now = time.time()*1000
         if det is None:
-            if now - self.last_ms > self.timeout_ms:
-                self.state = None
+            if self.state is not None:
+                now = time.time()*1000
+                if now - self.last_ms > self.timeout_ms:
+                    self.state = None
             return self.state
+        now = time.time()*1000
         x,y,w,h = det['bbox']
         if self.state is None:
             self.state = (x,y,w,h)
         else:
             sx,sy,sw,sh = self.state
-            self.state = (int(self.alpha*x + (1-self.alpha)*sx),
-                          int(self.alpha*y + (1-self.alpha)*sy),
-                          int(self.alpha*w + (1-self.alpha)*sw),
-                          int(self.alpha*h + (1-self.alpha)*sh))
+            # Extract smoothing calculation for clarity
+            new_x = int(self.alpha*x + (1-self.alpha)*sx)
+            new_y = int(self.alpha*y + (1-self.alpha)*sy)
+            new_w = int(self.alpha*w + (1-self.alpha)*sw)
+            new_h = int(self.alpha*h + (1-self.alpha)*sh)
+            self.state = (new_x, new_y, new_w, new_h)
         self.last_ms = now
         return self.state
 

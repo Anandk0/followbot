@@ -1,13 +1,8 @@
-# GPIO pins (BCM numbering) - no serial needed
-gpio:
-  motor_l1: 18
-  motor_l2: 19
-  motor_r1: 20
-  motor_r2: 21
-  motor_l_pwm: 12
-  motor_r_pwm: 13
-  trig_pin: 23
-  echo_pin: 24
+# ESP8266 Serial Communication
+esp8266:
+  port: "/dev/ttyUSB0"  # Adjust for your system (Windows: COM3, COM4, etc.)
+  baud: 115200
+  timeout: 1.0
 
 model:
   path: "../models/movenet_single_pose_lightning.tflite"
@@ -19,7 +14,7 @@ camera:
   fov_deg: 60.0     # approximate FOV of your camera
 
 control:
-  base_speed: 35       # PWM% abstracted at ESP32 side
+  base_speed: 35       # PWM% abstracted at ESP8266 side
   max_speed: 60
   angle_gain: 1.0      # scales FOV -> desired yaw
   align_deadband_deg: 4.0
@@ -36,4 +31,10 @@ pid:
 safety:
   stop_distance_cm: 30.0
   no_person_timeout_ms: 800
+  
+# ESP8266 Motor Controller Settings
+motor_controller:
+  max_speed_percent: 80
+  min_speed_percent: 20
+  acceleration_limit: 10  # Max speed change per step
 

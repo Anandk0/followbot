@@ -2,6 +2,9 @@ import cv2
 
 def draw_vis(frame, bbox, status):
     if bbox:
+        if len(bbox) != 4:
+            print(f"Invalid bbox format: {bbox}")
+            return
         x,y,w,h = bbox
         cv2.rectangle(frame, (x,y), (x+w,y+h), (0,255,0), 2)
         cx, cy = x+w//2, y+h//2

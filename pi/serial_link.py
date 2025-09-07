@@ -19,7 +19,7 @@ class SerialLink:
             self.ser = serial.Serial(self.port, self.baud, timeout=self.timeout)
             # small delay to allow device to reset
             time.sleep(0.1)
-        except Exception as e:
+        except (serial.SerialException, OSError) as e:
             self.ser = None
             print(f"[SerialLink] open error: {e}")
 
@@ -35,6 +35,9 @@ class SerialLink:
                 if not data:
                     continue
                 buf += data
+                # Prevent buffer overflow
+                if len(buf) > 4096:
+                    buf = buf[-2048:]  # Keep last 2KB
                 while b"\n" in buf:
                     line, buf = buf.split(b"\n", 1)
                     line = line.strip()
@@ -44,14 +47,14 @@ class SerialLink:
                         obj = json.loads(line.decode("utf-8", errors="ignore"))
                         self.rx_q.put(obj)
                         print(f"[SerialLink] RECV: {obj}")
-                    except Exception as e:
+                    except (json.JSONDecodeError, UnicodeDecodeError) as e:
                         # keep debug info but don't crash
                         print(f"[SerialLink] rx json parse err: {e} raw={line!r}")
-            except Exception as e:
+            except (serial.SerialException, OSError) as e:
                 print(f"[SerialLink] read error: {e}")
                 try:
                     self.ser.close()
-                except:
+                except (serial.SerialException, OSError):
                     pass
                 self.ser = None
                 time.sleep(0.5)
@@ -68,11 +71,11 @@ class SerialLink:
             self.ser.write(line)
             self.ser.flush()
             print(f"[SerialLink] SENT: {obj}")
-        except Exception as e:
+        except (serial.SerialException, OSError) as e:
             print(f"[SerialLink] write error: {e} -- attempting reconnect")
             try:
                 self.ser.close()
-            except:
+            except (serial.SerialException, OSError):
                 pass
             self.ser = None
 
@@ -87,5 +90,5 @@ class SerialLink:
         try:
             if self.ser:
                 self.ser.close()
-        except:
+        except (serial.SerialException, OSError):
             pass

@@ -4,56 +4,56 @@ from detector_movenet import MoveNetDetector
 from tracker import SmoothTracker
 from bno055_reader import BNO055Reader
 from pid import PID
-from motor_driver import MotorDriver
+from esp8266_motor_driver import ESP8266MotorDriver
 from control import Controller
 from utils import draw_vis
 
 def load_cfg(path):
+    import os
+    # Prevent path traversal attacks
+    if not os.path.basename(path) == path or '..' in path:
+        raise ValueError("Invalid config file path")
     with open(path,'r') as f: return yaml.safe_load(f)
+
+def setup_camera(cfg):
+    """Setup camera with fallback options"""
+    w, h = cfg["camera"]["width"], cfg["camera"]["height"]
+    
+    # Try GStreamer first
+    gst_pipeline = f'libcamerasrc ! video/x-raw,width={w},height={h},framerate=30/1 ! videoconvert ! appsink'
+    cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
+    
+    if cap.isOpened():
+        print(f"GStreamer camera started: {w}x{h}")
+        return cap, None, False
+    
+    # Try rpicam-vid
+    cmd = ['rpicam-vid', '--inline', '--nopreview', f'--width={w}', f'--height={h}', '--framerate=30', '--timeout=0', '--codec=mjpeg', '--output=-']
+    try:
+        camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+        print(f"Using rpicam-vid: {w}x{h}")
+        return None, camera_proc, True
+    except Exception as e:
+        print(f"rpicam-vid failed: {e}")
+    
+    # Try default camera
+    cap = cv2.VideoCapture(0)
+    if cap.isOpened():
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+        print(f"Using default camera: {w}x{h}")
+        return cap, None, False
+    
+    raise RuntimeError("No camera available")
 
 def main():
     cfg = load_cfg("config.yaml")
-
-    # camera - use GStreamer with libcamera
-    print("Starting camera with GStreamer...")
-    w, h = cfg["camera"]["width"], cfg["camera"]["height"]
     
-    # GStreamer pipeline for libcamera
-    gst_pipeline = (
-        f'libcamerasrc ! '
-        f'video/x-raw,width={w},height={h},framerate=30/1 ! '
-        f'videoconvert ! appsink'
-    )
-    
-    cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
-    
-    if not cap.isOpened():
-        print("Failed to open GStreamer pipeline, trying rpicam-vid...")
-        # Fallback to rpicam-vid for Raspberry Pi
-        cmd = [
-            'rpicam-vid', '--inline', '--nopreview',
-            f'--width={w}', f'--height={h}',
-            '--framerate=30', '--timeout=0',
-            '--codec=mjpeg', '--output=-'
-        ]
-        try:
-            camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-            print(f"Using rpicam-vid: {w}x{h}")
-            use_subprocess = True
-        except Exception as e:
-            print(f"rpicam-vid failed, trying default camera: {e}")
-            cap = cv2.VideoCapture(0)
-            if cap.isOpened():
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
-                print(f"Using default camera: {w}x{h}")
-                use_subprocess = False
-            else:
-                print("No camera available")
-                return
-    else:
-        print(f"GStreamer camera started: {w}x{h}")
-        use_subprocess = False
+    try:
+        cap, camera_proc, use_subprocess = setup_camera(cfg)
+    except RuntimeError as e:
+        print(e)
+        return
 
     det = MoveNetDetector(cfg["model"]["path"], cfg["model"]["input_size"])
     trk = SmoothTracker(alpha=0.35, timeout_ms=cfg["safety"]["no_person_timeout_ms"])
@@ -70,9 +70,21 @@ def main():
         bno = MockBNO()
     pid = PID(cfg["pid"]["kp"], cfg["pid"]["ki"], cfg["pid"]["kd"], cfg["pid"]["out_limit"])
     
-    # Initialize motor driver
-    motors = MotorDriver()
-    print("Motor driver initialized")
+    # Initialize ESP8266 motor driver
+    esp_cfg = cfg.get("esp8266", {})
+    port = esp_cfg.get("port", "/dev/ttyUSB0")
+    baud = esp_cfg.get("baud", 115200)
+    
+    try:
+        motors = ESP8266MotorDriver(port, baud)
+        if motors.is_connected():
+            print(f"ESP8266 motor driver connected on {port}")
+        else:
+            print(f"Failed to connect to ESP8266 on {port}")
+            return
+    except Exception as e:
+        print(f"ESP8266 connection failed: {e}")
+        return
     
     ctl = Controller(cfg, pid, bno, motors)
 
@@ -87,8 +99,11 @@ def main():
                 buffer = b''
                 frame = None
                 while True:
-                    chunk = camera_proc.stdout.read(1024)
-                    if not chunk:
+                    try:
+                        chunk = camera_proc.stdout.read(1024)
+                        if not chunk:
+                            break
+                    except Exception:
                         break
                     buffer += chunk
                     
@@ -156,9 +171,13 @@ def main():
         if 'camera_proc' in locals():
             try:
                 camera_proc.terminate()
-                camera_proc.wait(timeout=5)
-            except:
-                camera_proc.kill()
+                try:
+                    camera_proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    camera_proc.kill()
+                    camera_proc.wait()
+            except (subprocess.TimeoutExpired, ProcessLookupError) as e:
+                print(f"Camera cleanup error: {e}")
         cv2.destroyAllWindows()
 
 if __name__ == "__main__":

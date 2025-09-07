@@ -12,7 +12,6 @@ class BNO055Reader:
             raise RuntimeError("BNO055 libraries not available on this platform")
         i2c = bus or busio.I2C(board.SCL, board.SDA)
         self.sensor = adafruit_bno055.BNO055_I2C(i2c)
-        self._last_ok = time.time()
 
     @staticmethod
     def _wrap180(deg):

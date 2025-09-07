@@ -11,12 +11,20 @@ class Controller:
         self.last_obstacle_cm = None
         self.last_rx_ts = 0
 
-    def handle_rx(self, msg):
-        # expected: {"telemetry":{"distance_cm":xx.x,"bat_v":x.x}}
-        tele = msg.get("telemetry")
-        if tele and "distance_cm" in tele:
-            self.last_obstacle_cm = float(tele["distance_cm"])
+    def _process_distance_telemetry(self, telem_data):
+        """Process distance telemetry data"""
+        if telem_data and "distance_cm" in telem_data:
+            self.last_obstacle_cm = float(telem_data["distance_cm"])
             self.last_rx_ts = time.time()
+            
+    def handle_rx(self, msg):
+        """Handle telemetry from ESP8266"""
+        self._process_distance_telemetry(msg.get("telemetry"))
+            
+    def update_telemetry(self):
+        """Update telemetry from ESP8266"""
+        if hasattr(self.motors, 'get_telemetry'):
+            self._process_distance_telemetry(self.motors.get_telemetry())
 
     def obstacle_blocked(self):
         if self.last_obstacle_cm is None: return False
@@ -27,14 +35,14 @@ class Controller:
         right = int(clamp(right, -100, 100))
         print(f"Motor command: L={left}, R={right}")
         
-        # Convert to motor commands
+        # Convert to motor commands with consistent logic
         if left > 0 and right > 0:
-            self.motors.send({'action': 'forward', 'speed': (left + right) // 2})
+            self.motors.send({'action': 'forward', 'speed': max(abs(left), abs(right))})
         elif left < 0 and right < 0:
-            self.motors.send({'action': 'backward', 'speed': abs((left + right) // 2)})
-        elif left > 0 and right <= 0:
+            self.motors.send({'action': 'backward', 'speed': max(abs(left), abs(right))})
+        elif left > 0 and right < 0:
             self.motors.send({'action': 'right', 'speed': abs(left)})
-        elif left <= 0 and right > 0:
+        elif left < 0 and right > 0:
             self.motors.send({'action': 'left', 'speed': abs(right)})
         else:
             self.motors.send({'action': 'stop'})
@@ -48,6 +56,9 @@ class Controller:
         bbox: (x,y,w,h) or None
         returns (left,right,status_str)
         """
+        # Update telemetry from ESP8266
+        self.update_telemetry()
+        
         base = self.cfg["control"]["base_speed"]
         maxs = self.cfg["control"]["max_speed"]
         fov = self.cfg["camera"]["fov_deg"]
@@ -90,7 +101,6 @@ class Controller:
                 status = f"FORWARD yaw_ok"
             else:
                 # rotate in place for strong yaw errors
-                s = base + min(30, abs(u))
                 left = clamp(-u, -maxs, maxs)
                 right = clamp(u, -maxs, maxs)
                 status = f"ROTATE yaw_err={err:.1f}"

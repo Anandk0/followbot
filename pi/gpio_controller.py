@@ -25,13 +25,19 @@ class GPIOController:
         self.TRIG_PIN = 23
         self.ECHO_PIN = 24
         
-        self._setup_gpio()
-        self._telemetry_thread = threading.Thread(target=self._telemetry_loop, daemon=True)
-        self._telemetry_running = True
-        self._telemetry_thread.start()
+        try:
+            self._setup_gpio()
+            self._telemetry_thread = threading.Thread(target=self._telemetry_loop, daemon=True)
+            self._telemetry_running = True
+            self._telemetry_thread.start()
+        except Exception as e:
+            print(f"GPIO setup failed: {e}")
+            self.has_gpio = False
         self.last_distance = 999.0
         
     def _setup_gpio(self):
+        if not self.has_gpio:
+            return
         GPIO.setmode(GPIO.BCM)
         GPIO.setwarnings(False)
         
@@ -60,6 +66,10 @@ class GPIOController:
         if not self.has_gpio:
             print(f"MOCK GPIO: Motors L={left}, R={right}")
             return
+        
+        # Clamp speeds to valid range
+        left = max(-100, min(100, left))
+        right = max(-100, min(100, right))
             
         # Left motor
         if left > 0:
@@ -125,7 +135,7 @@ class GPIOController:
                 distance = (duration * 34300) / 2  # Speed of sound
                 return min(distance, 400.0)  # Cap at 4m
             return 999.0
-        except:
+        except (RuntimeError, TimeoutError):
             return 999.0
             
     def _telemetry_loop(self):
@@ -146,6 +156,8 @@ class GPIOController:
     def cleanup(self):
         """Cleanup GPIO resources"""
         self._telemetry_running = False
+        if hasattr(self, '_telemetry_thread') and self._telemetry_thread.is_alive():
+            self._telemetry_thread.join(timeout=1.0)
         if self.has_gpio:
             self.stop_motors()
             GPIO.cleanup()

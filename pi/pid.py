@@ -17,8 +17,8 @@ class PID:
         if self.ilim is not None:
             self.i = max(-self.ilim, min(self.ilim, self.i))
         d = 0.0
-        if self.prev is not None:
-            d = self.kd * (err - self.prev) / max(1e-3, dt)
+        if self.prev is not None and dt > 1e-6:
+            d = self.kd * (err - self.prev) / dt
         self.prev = err
         out = p + self.i + d
         if self.olim is not None:
