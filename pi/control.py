@@ -100,20 +100,26 @@ class Controller:
         # forward gating by distance proxy (bbox height)
         tgt_h = self.cfg["control"]["follow_target_px"]
         if h >= tgt_h:         # too close
-            left = -abs(left)*0.2
-            right = -abs(right)*0.2
+            left = -abs(left)*0.3
+            right = -abs(right)*0.3
             status = f"BACKOFF yaw_err={err:.1f}"
         else:
-            # allow forward only when roughly aligned
+            # Prioritize alignment - only move forward when well-aligned
             if abs(err) <= dead:
-                left = clamp(abs(left), 0, maxs)
-                right = clamp(abs(right), 0, maxs)
-                status = f"FORWARD yaw_ok"
+                # Move forward when aligned
+                left = clamp(base - u*0.5, 0, maxs)  # Reduced turning while moving forward
+                right = clamp(base + u*0.5, 0, maxs)
+                status = f"FORWARD yaw_ok err={err:.1f}"
             else:
-                # rotate in place for strong yaw errors
-                left = clamp(-u, -maxs, maxs)
-                right = clamp(u, -maxs, maxs)
-                status = f"ROTATE yaw_err={err:.1f}"
+                # Turn in place when not aligned - no forward movement
+                turn_speed = clamp(abs(u), 30, maxs)  # Minimum turn speed
+                if u > 0:  # Turn right
+                    left = turn_speed
+                    right = -turn_speed
+                else:  # Turn left
+                    left = -turn_speed
+                    right = turn_speed
+                status = f"TURN_ONLY yaw_err={err:.1f} u={u:.1f}"
 
         self.drive_raw(left, right)
         return (left, right, status)
