@@ -17,33 +17,34 @@ def load_cfg(path):
     with open(path,'r') as f: return yaml.safe_load(f)
 
 def setup_camera(cfg):
-    """Setup camera with fallback options"""
+    """Setup camera with fallback options and error recovery"""
     w, h = cfg["camera"]["width"], cfg["camera"]["height"]
     
-    # Try GStreamer first
-    gst_pipeline = f'libcamerasrc ! video/x-raw,width={w},height={h},framerate=30/1 ! videoconvert ! appsink'
+    # Try default camera first (most reliable)
+    cap = cv2.VideoCapture(0)
+    if cap.isOpened():
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Reduce buffer for lower latency
+        print(f"Using default camera: {w}x{h}")
+        return cap, None, False
+    
+    # Try GStreamer with timeout
+    gst_pipeline = f'libcamerasrc ! video/x-raw,width={w},height={h},framerate=15/1 ! videoconvert ! appsink drop=1 max-buffers=1'
     cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
     
     if cap.isOpened():
         print(f"GStreamer camera started: {w}x{h}")
         return cap, None, False
     
-    # Try rpicam-vid
-    cmd = ['rpicam-vid', '--inline', '--nopreview', f'--width={w}', f'--height={h}', '--framerate=30', '--timeout=0', '--codec=mjpeg', '--output=-']
+    # Try rpicam-vid with lower framerate
+    cmd = ['rpicam-vid', '--inline', '--nopreview', f'--width={w}', f'--height={h}', '--framerate=15', '--timeout=0', '--codec=mjpeg', '--output=-']
     try:
-        camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+        camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         print(f"Using rpicam-vid: {w}x{h}")
         return None, camera_proc, True
     except Exception as e:
         print(f"rpicam-vid failed: {e}")
-    
-    # Try default camera
-    cap = cv2.VideoCapture(0)
-    if cap.isOpened():
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
-        print(f"Using default camera: {w}x{h}")
-        return cap, None, False
     
     raise RuntimeError("No camera available")
 
@@ -102,6 +103,8 @@ def main():
     try:
         frame_count = 0
         frame = None
+        camera_error_count = 0
+        last_restart = 0
         
         while True:
             if use_subprocess:
@@ -138,26 +141,49 @@ def main():
                         break
                         
                 if frame is None:
-                    print("Failed to decode MJPEG frame")
-                    if camera_proc.poll() is not None:
-                        print("Camera process died, exiting")
-                        break
+                    camera_error_count += 1
+                    print(f"Failed to decode MJPEG frame (errors: {camera_error_count})")
+                    if camera_proc.poll() is not None or camera_error_count > 10:
+                        print("Camera process died or too many errors, attempting restart")
+                        if time.time() - last_restart > 5:  # Don't restart too frequently
+                            try:
+                                camera_proc.terminate()
+                                camera_proc.wait(timeout=2)
+                            except:
+                                pass
+                            cap, camera_proc, use_subprocess = setup_camera(cfg)
+                            camera_error_count = 0
+                            last_restart = time.time()
+                        continue
+                    time.sleep(0.1)  # Brief pause on error
                     continue
+                else:
+                    camera_error_count = 0  # Reset error count on success
             else:
                 # Use camera capture
                 ret, frame = cap.read()
                 if not ret or frame is None:
-                    print("Failed to read frame from camera")
+                    camera_error_count += 1
+                    print(f"Failed to read frame from camera (errors: {camera_error_count})")
+                    if camera_error_count > 5:
+                        print("Too many camera errors, attempting restart")
+                        if time.time() - last_restart > 5:
+                            cap.release()
+                            cap, camera_proc, use_subprocess = setup_camera(cfg)
+                            camera_error_count = 0
+                            last_restart = time.time()
+                    time.sleep(0.1)
                     continue
+                else:
+                    camera_error_count = 0
                     
             frame_count += 1
-            if frame_count % 30 == 1:
+            if frame_count % 60 == 1:  # Reduce debug output
                 print(f"Processing frame {frame_count}, shape: {frame.shape}")
             h, w = frame.shape[:2]
 
-            # Process frame
+            # Skip if no frame
             if frame is None:
-                print("No frame available")
                 continue
 
             # detection
