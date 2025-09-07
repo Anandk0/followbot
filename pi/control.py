@@ -100,26 +100,30 @@ class Controller:
         # forward gating by distance proxy (bbox height)
         tgt_h = self.cfg["control"]["follow_target_px"]
         if h >= tgt_h:         # too close
-            left = -abs(left)*0.3
-            right = -abs(right)*0.3
+            left = -base*0.4
+            right = -base*0.4
             status = f"BACKOFF yaw_err={err:.1f}"
         else:
-            # Prioritize alignment - only move forward when well-aligned
+            # Step-by-step turning logic
             if abs(err) <= dead:
-                # Move forward when aligned
-                left = clamp(base - u*0.5, 0, maxs)  # Reduced turning while moving forward
-                right = clamp(base + u*0.5, 0, maxs)
-                status = f"FORWARD yaw_ok err={err:.1f}"
-            else:
-                # Turn in place when not aligned - no forward movement
-                turn_speed = clamp(abs(u), 30, maxs)  # Minimum turn speed
-                if u > 0:  # Turn right
-                    left = turn_speed
-                    right = -turn_speed
-                else:  # Turn left
-                    left = -turn_speed
-                    right = turn_speed
-                status = f"TURN_ONLY yaw_err={err:.1f} u={u:.1f}"
+                # Well aligned - move forward with slight correction
+                left = base - u*0.3
+                right = base + u*0.3
+                status = f"FORWARD aligned err={err:.1f}"
+            elif abs(err) <= 25:  # Medium error - gentle turn while moving
+                turn_factor = 0.6
+                left = base*0.7 - u*turn_factor
+                right = base*0.7 + u*turn_factor
+                status = f"GENTLE_TURN err={err:.1f}"
+            else:  # Large error - stronger turn, less forward
+                turn_factor = 0.8
+                left = base*0.3 - u*turn_factor
+                right = base*0.3 + u*turn_factor
+                status = f"STRONG_TURN err={err:.1f}"
+            
+            # Ensure minimum speeds and limits
+            left = clamp(left, -maxs, maxs)
+            right = clamp(right, -maxs, maxs)
 
         self.drive_raw(left, right)
         return (left, right, status)

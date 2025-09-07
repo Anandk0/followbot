@@ -23,17 +23,17 @@ camera:
 control:
   base_speed: 45       # PWM% abstracted at ESP8266 side
   max_speed: 80
-  angle_gain: 2.0      # scales FOV -> desired yaw (increased for more turning)
-  align_deadband_deg: 8.0
+  angle_gain: 0.8      # scales FOV -> desired yaw (reduced for gentler turning)
+  align_deadband_deg: 15.0
   follow_target_px: 260     # target bbox height (distance proxy)
   follow_kp: 0.20
   follow_kd: 0.05
 
 pid:
-  kp: 2.0
+  kp: 0.8
   ki: 0.0
-  kd: 0.3
-  out_limit: 80
+  kd: 0.1
+  out_limit: 40
 
 safety:
   stop_distance_cm: 30.0
