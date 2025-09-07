@@ -35,17 +35,23 @@ class Controller:
         right = int(clamp(right, -100, 100))
         print(f"Motor command: L={left}, R={right}")
         
-        # Convert to motor commands with consistent logic
-        if left > 0 and right > 0:
-            self.motors.send({'action': 'forward', 'speed': max(abs(left), abs(right))})
-        elif left < 0 and right < 0:
-            self.motors.send({'action': 'backward', 'speed': max(abs(left), abs(right))})
-        elif left > 0 and right < 0:
-            self.motors.send({'action': 'right', 'speed': abs(left)})
-        elif left < 0 and right > 0:
-            self.motors.send({'action': 'left', 'speed': abs(right)})
+        # Send individual motor speeds directly to ESP8266
+        if hasattr(self.motors, 'set_motor_speeds'):
+            self.motors.set_motor_speeds(left, right)
         else:
-            self.motors.send({'action': 'stop'})
+            # Fallback for mock driver
+            if left == 0 and right == 0:
+                self.motors.send({'action': 'stop'})
+            elif left > 0 and right > 0:
+                self.motors.send({'action': 'forward', 'speed': max(abs(left), abs(right))})
+            elif left < 0 and right < 0:
+                self.motors.send({'action': 'backward', 'speed': max(abs(left), abs(right))})
+            elif left > 0 and right < 0:
+                self.motors.send({'action': 'right', 'speed': abs(left)})
+            elif left < 0 and right > 0:
+                self.motors.send({'action': 'left', 'speed': abs(right)})
+            else:
+                self.motors.send({'action': 'stop'})
 
     def stop(self):
         print("STOP command")
