@@ -17,28 +17,22 @@ def load_cfg(path):
     with open(path,'r') as f: return yaml.safe_load(f)
 
 def setup_camera(cfg):
-    """Setup camera with fallback options and error recovery"""
+    """Setup camera using libcamera-vid (most reliable)"""
     w, h = cfg["camera"]["width"], cfg["camera"]["height"]
     
-    # Try default camera first (most reliable)
-    cap = cv2.VideoCapture(0)
-    if cap.isOpened():
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Reduce buffer for lower latency
-        print(f"Using default camera: {w}x{h}")
-        return cap, None, False
+    # Use libcamera-vid directly (most reliable for Pi camera)
+    cmd = ['libcamera-vid', '--inline', '--nopreview', f'--width={w}', f'--height={h}', 
+           '--framerate=20', '--timeout=0', '--codec=mjpeg', '--output=-', '--flush']
+    try:
+        camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        print(f"Using libcamera-vid: {w}x{h}")
+        return None, camera_proc, True
+    except Exception as e:
+        print(f"libcamera-vid failed: {e}")
     
-    # Try GStreamer with timeout
-    gst_pipeline = f'libcamerasrc ! video/x-raw,width={w},height={h},framerate=15/1 ! videoconvert ! appsink drop=1 max-buffers=1'
-    cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
-    
-    if cap.isOpened():
-        print(f"GStreamer camera started: {w}x{h}")
-        return cap, None, False
-    
-    # Try rpicam-vid with lower framerate
-    cmd = ['rpicam-vid', '--inline', '--nopreview', f'--width={w}', f'--height={h}', '--framerate=15', '--timeout=0', '--codec=mjpeg', '--output=-']
+    # Fallback to rpicam-vid
+    cmd = ['rpicam-vid', '--inline', '--nopreview', f'--width={w}', f'--height={h}', 
+           '--framerate=20', '--timeout=0', '--codec=mjpeg', '--output=-']
     try:
         camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         print(f"Using rpicam-vid: {w}x{h}")
@@ -145,12 +139,15 @@ def main():
                     print(f"Failed to decode MJPEG frame (errors: {camera_error_count})")
                     if camera_proc.poll() is not None or camera_error_count > 10:
                         print("Camera process died or too many errors, attempting restart")
-                        if time.time() - last_restart > 5:  # Don't restart too frequently
+                        if time.time() - last_restart > 3:  # Restart more frequently
                             try:
                                 camera_proc.terminate()
-                                camera_proc.wait(timeout=2)
+                                camera_proc.wait(timeout=1)
                             except:
-                                pass
+                                try:
+                                    camera_proc.kill()
+                                except:
+                                    pass
                             cap, camera_proc, use_subprocess = setup_camera(cfg)
                             camera_error_count = 0
                             last_restart = time.time()
@@ -165,10 +162,11 @@ def main():
                 if not ret or frame is None:
                     camera_error_count += 1
                     print(f"Failed to read frame from camera (errors: {camera_error_count})")
-                    if camera_error_count > 5:
+                    if camera_error_count > 3:
                         print("Too many camera errors, attempting restart")
-                        if time.time() - last_restart > 5:
-                            cap.release()
+                        if time.time() - last_restart > 3:
+                            if cap:
+                                cap.release()
                             cap, camera_proc, use_subprocess = setup_camera(cfg)
                             camera_error_count = 0
                             last_restart = time.time()

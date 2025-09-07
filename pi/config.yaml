@@ -16,8 +16,8 @@ model:
   input_size: 192   # 192x192 for lightning
 
 camera:
-  width: 640
-  height: 480
+  width: 320
+  height: 240
   fov_deg: 60.0     # approximate FOV of your camera
 
 control:
