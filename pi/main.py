@@ -5,6 +5,7 @@ from tracker import SmoothTracker
 from bno055_reader import BNO055Reader
 from pid import PID
 from esp8266_motor_driver import ESP8266MotorDriver
+from wifi_motor_driver import WiFiMotorDriver
 from control import Controller
 from utils import draw_vis
 
@@ -72,9 +73,8 @@ def main():
     
     # Initialize motor driver with fallback
     esp_cfg = cfg.get("esp8266", {})
-    port = esp_cfg.get("port", "/dev/ttyUSB0")
-    baud = esp_cfg.get("baud", 115200)
     use_mock = esp_cfg.get("use_mock", False)
+    use_wifi = esp_cfg.get("use_wifi", False)
     
     if use_mock:
         print("Using mock motor driver (configured)")
@@ -82,10 +82,17 @@ def main():
             def send(self, cmd): print(f"MOCK MOTOR: {cmd}")
             def close(self): pass
         motors = MockMotorDriver()
+    elif use_wifi:
+        # Use WiFi connection
+        esp_ip = esp_cfg.get("ip", "192.168.1.100")
+        motors = WiFiMotorDriver(esp_ip)
+        print(f"WiFi motor driver initialized for {esp_ip}")
     else:
-        # Force ESP8266 connection - no fallback to mock
+        # Use serial connection
+        port = esp_cfg.get("port", "/dev/ttyUSB0")
+        baud = esp_cfg.get("baud", 115200)
         motors = ESP8266MotorDriver(port, baud)
-        print(f"ESP8266 motor driver initialized on {port}")
+        print(f"Serial motor driver initialized on {port}")
         if not motors.is_connected():
             print("WARNING: ESP8266 not responding, but continuing...")
     

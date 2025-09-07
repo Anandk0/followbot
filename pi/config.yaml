@@ -1,9 +1,14 @@
-# ESP8266 Serial Communication
+# ESP8266 Communication
 esp8266:
-  port: "COM3"  # Windows: COM3, COM4, COM5, etc. | Linux: /dev/ttyUSB0, /dev/ttyACM0
+  # Serial (old method)
+  port: "/dev/ttyUSB1"
   baud: 115200
   timeout: 2.0
-  use_mock: false  # Use mock driver when ESP8266 not connected
+  use_mock: false
+  
+  # WiFi (new method)
+  use_wifi: true
+  ip: "192.168.1.100"  # Update with your ESP8266 IP
 
 model:
   path: "../models/movenet_single_pose_lightning.tflite"
