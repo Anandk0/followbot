@@ -1,4 +1,4 @@
-# esp8266_motor_driver.py - ESP8266 Motor Controller Interface
+# esp8266_motor_driver.py - ESP8266 Motor Controller Interface with Robust Connection
 import serial
 import json
 import time
@@ -15,17 +15,43 @@ class ESP8266MotorDriver:
         self.rx_queue = Queue()
         self.rx_thread = None
         self.running = False
+        self.reconnect_attempts = 0
+        self.max_reconnect_attempts = 5
+        self.last_successful_command = time.time()
         
         self.connect()
         
     def connect(self):
-        """Establish serial connection to ESP8266"""
+        """Establish robust serial connection to ESP8266"""
         try:
-            self.ser = serial.Serial(self.port, self.baud, timeout=1.0)
-            time.sleep(2)  # Wait for ESP8266 to boot
+            # Close existing connection if any
+            if self.ser and self.ser.is_open:
+                self.ser.close()
+                time.sleep(0.5)
             
-            # Send ping to verify connection
-            self.send_command({"cmd": "ping"})
+            print(f"[ESP8266] Connecting to {self.port}...")
+            self.ser = serial.Serial(
+                port=self.port,
+                baudrate=self.baud,
+                timeout=2.0,
+                write_timeout=2.0,
+                bytesize=serial.EIGHTBITS,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE,
+                xonxoff=False,
+                rtscts=False,
+                dsrdtr=False
+            )
+            
+            # Wait for ESP8266 to boot and clear buffers
+            time.sleep(2)
+            self.ser.reset_input_buffer()
+            self.ser.reset_output_buffer()
+            
+            # Test connection with ping
+            test_cmd = {"cmd": "ping"}
+            self.ser.write((json.dumps(test_cmd) + '\n').encode())
+            self.ser.flush()
             time.sleep(0.5)
             
             # Start receiver thread
@@ -34,6 +60,8 @@ class ESP8266MotorDriver:
             self.rx_thread.start()
             
             self.connected = True
+            self.reconnect_attempts = 0
+            self.last_successful_command = time.time()
             print(f"[ESP8266] Connected to {self.port}")
             
         except Exception as e:
@@ -65,17 +93,43 @@ class ESP8266MotorDriver:
                 time.sleep(0.1)
                 
     def send_command(self, cmd_dict):
-        """Send JSON command to ESP8266"""
-        if not self.connected or not self.ser:
-            return False
-            
-        try:
-            cmd_json = json.dumps(cmd_dict) + '\n'
-            self.ser.write(cmd_json.encode('utf-8'))
-            return True
-        except Exception as e:
-            print(f"[ESP8266] Send error: {e}")
-            return False
+        """Send JSON command to ESP8266 with automatic reconnection"""
+        if not self.connected:
+            if not self.connect():
+                return False
+        
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                if not self.ser or not self.ser.is_open:
+                    if not self.connect():
+                        return False
+                
+                cmd_json = json.dumps(cmd_dict) + '\n'
+                self.ser.write(cmd_json.encode('utf-8'))
+                self.ser.flush()  # Force write
+                self.last_successful_command = time.time()
+                return True
+                
+            except (serial.SerialException, OSError) as e:
+                print(f"[ESP8266] Send error (attempt {attempt+1}): {e}")
+                
+                if "Input/output error" in str(e) or "Errno 5" in str(e):
+                    print("[ESP8266] I/O error detected - attempting reconnection...")
+                    self.connected = False
+                    
+                    if attempt < max_retries - 1:  # Don't reconnect on last attempt
+                        time.sleep(0.5)
+                        if self.connect():
+                            continue
+                
+                if attempt == max_retries - 1:
+                    print("[ESP8266] Max retries reached - command failed")
+                    return False
+                    
+                time.sleep(0.2)
+        
+        return False
             
     def send(self, cmd: dict):
         """Process movement commands (compatible with motor_driver.py interface)"""
