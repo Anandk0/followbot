@@ -8,6 +8,7 @@ from esp8266_motor_driver import ESP8266MotorDriver
 from wifi_motor_driver import WiFiMotorDriver
 from control import Controller
 from utils import draw_vis
+from mediapipe_camera import MediaPipeCamera
 
 def load_cfg(path):
     import os
@@ -17,25 +18,31 @@ def load_cfg(path):
     with open(path,'r') as f: return yaml.safe_load(f)
 
 def setup_camera(cfg):
-    """Simple camera setup using libcamera-vid"""
-    w, h = 320, 240
+    """Setup MediaPipe camera for fast capture"""
+    w, h = cfg["camera"]["width"], cfg["camera"]["height"]
     
-    # Use libcamera-vid (most reliable)
-    cmd = ['libcamera-vid', '--inline', '--nopreview', f'--width={w}', f'--height={h}', 
-           '--framerate=25', '--timeout=0', '--codec=mjpeg', '--output=-']
     try:
-        camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        print(f"Camera started: {w}x{h}@25fps")
-        return None, camera_proc, True
+        camera = MediaPipeCamera(w, h, 30)
+        return camera, None, False
     except Exception as e:
-        print(f"Camera failed: {e}")
-        raise RuntimeError("Camera not available")
+        print(f"MediaPipe camera failed: {e}")
+        
+        # Fallback to libcamera-vid
+        cmd = ['libcamera-vid', '--inline', '--nopreview', f'--width={w}', f'--height={h}', 
+               '--framerate=25', '--timeout=0', '--codec=mjpeg', '--output=-']
+        try:
+            camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            print(f"Fallback camera started: {w}x{h}@25fps")
+            return None, camera_proc, True
+        except Exception as e2:
+            print(f"All cameras failed: {e2}")
+            raise RuntimeError("No camera available")
 
 def main():
     cfg = load_cfg("config.yaml")
     
     try:
-        cap, camera_proc, use_subprocess = setup_camera(cfg)
+        camera, camera_proc, use_subprocess = setup_camera(cfg)
     except RuntimeError as e:
         print(e)
         return
@@ -91,7 +98,7 @@ def main():
         
         while True:
             if use_subprocess:
-                # Read MJPEG frame from rpicam-vid
+                # Read MJPEG frame from libcamera-vid (fallback)
                 buffer = b''
                 frame = None
                 while True:
@@ -125,35 +132,30 @@ def main():
                         
                 if frame is None:
                     camera_error_count += 1
-                    print(f"Failed to decode MJPEG frame (errors: {camera_error_count})")
-                    if camera_proc.poll() is not None or camera_error_count > 10:
-                        print("Camera process died or too many errors, attempting restart")
-                        if time.time() - last_restart > 5:  # Don't restart too often
+                    if camera_error_count > 10:
+                        print("Too many camera errors, restarting...")
+                        if time.time() - last_restart > 5:
                             try:
                                 camera_proc.terminate()
                                 camera_proc.wait(timeout=2)
                             except:
-                                try:
-                                    camera_proc.kill()
-                                except:
-                                    pass
-                            cap, camera_proc, use_subprocess = setup_camera(cfg)
+                                pass
+                            camera, camera_proc, use_subprocess = setup_camera(cfg)
                             camera_error_count = 0
                             last_restart = time.time()
-                        continue
-                    time.sleep(0.1)  # Brief pause on error
                     continue
                 else:
-                    camera_error_count = 0  # Reset error count on success
+                    camera_error_count = 0
             else:
-                # Use camera capture
-                ret, frame = cap.read()
-                if not ret or frame is None:
+                # Use MediaPipe camera (fast)
+                frame = camera.read_frame()
+                if frame is None:
                     camera_error_count += 1
-                    print(f"Failed to read frame from camera (errors: {camera_error_count})")
-                    # OpenCV not used anymore
-                    pass
-                    time.sleep(0.1)
+                    if camera_error_count > 5:
+                        print("MediaPipe camera error, restarting...")
+                        camera.release()
+                        camera, camera_proc, use_subprocess = setup_camera(cfg)
+                        camera_error_count = 0
                     continue
                 else:
                     camera_error_count = 0
@@ -190,11 +192,11 @@ def main():
 
     finally:
         motors.close()
-        if 'cap' in locals() and cap.isOpened():
-            cap.release()
+        if 'camera' in locals() and camera:
+            camera.release()
         if 'camera_proc' in locals() and camera_proc:
             try:
-                if camera_proc.poll() is None:  # Process still running
+                if camera_proc.poll() is None:
                     camera_proc.terminate()
                     try:
                         camera_proc.wait(timeout=2)
