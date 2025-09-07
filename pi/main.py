@@ -74,20 +74,28 @@ def main():
     esp_cfg = cfg.get("esp8266", {})
     port = esp_cfg.get("port", "/dev/ttyUSB0")
     baud = esp_cfg.get("baud", 115200)
+    use_mock = esp_cfg.get("use_mock", False)
     
-    try:
-        motors = ESP8266MotorDriver(port, baud)
-        if motors.is_connected():
-            print(f"ESP8266 motor driver connected on {port}")
-        else:
-            raise ConnectionError("ESP8266 not responding")
-    except Exception as e:
-        print(f"ESP8266 connection failed: {e}")
-        print("Using mock motor driver")
+    if use_mock:
+        print("Using mock motor driver (configured)")
         class MockMotorDriver:
             def send(self, cmd): print(f"MOCK MOTOR: {cmd}")
             def close(self): pass
         motors = MockMotorDriver()
+    else:
+        try:
+            motors = ESP8266MotorDriver(port, baud)
+            if motors.is_connected():
+                print(f"ESP8266 motor driver connected on {port}")
+            else:
+                raise ConnectionError("ESP8266 not responding")
+        except Exception as e:
+            print(f"ESP8266 connection failed: {e}")
+            print("Using mock motor driver")
+            class MockMotorDriver:
+                def send(self, cmd): print(f"MOCK MOTOR: {cmd}")
+                def close(self): pass
+            motors = MockMotorDriver()
     
     ctl = Controller(cfg, pid, bno, motors)
 
