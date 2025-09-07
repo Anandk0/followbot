@@ -36,9 +36,13 @@ class Controller:
         print(f"Motor command: L={left}, R={right}")
         
         # Send individual motor speeds directly to ESP8266
-        if hasattr(self.motors, 'set_motor_speeds'):
+        try:
             self.motors.set_motor_speeds(left, right)
-        else:
+            return
+        except AttributeError:
+            pass
+        
+        # Fallback for mock driver
             # Fallback for mock driver
             if left == 0 and right == 0:
                 self.motors.send({'action': 'stop'})
