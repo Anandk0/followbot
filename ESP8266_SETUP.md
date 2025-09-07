@@ -48,7 +48,7 @@
 4. **Test Connection:**
    ```bash
    cd pi/
-   python test_esp8266.py
+   python test_esp8266_simple.py
    ```
 
 5. **Run FollowBot:**
@@ -59,7 +59,34 @@
 
 ## Troubleshooting
 
+### Connection Issues
 - **No serial connection:** Check USB cable, try different COM ports
 - **Permission denied:** `sudo chmod 666 /dev/ttyUSB0` on Linux
+- **I/O Error [Errno 5]:** Serial port corruption, try:
+  ```bash
+  # Disconnect ESP8266, then:
+  sudo rmmod ftdi_sio
+  sudo modprobe ftdi_sio
+  # Or reboot system
+  ```
+
+### Hardware Issues
 - **Motors not moving:** Check L298N power supply and connections
 - **Distance sensor not working:** Verify HC-SR04 wiring and power
+- **ESP8266 not responding:** Check power supply (3.3V/5V), try different USB cable
+
+### Software Issues
+- **Command format errors:** ESP8266 expects:
+  - `{"cmd": "set_speed", "left": 50, "right": 50}` for movement
+  - `{"cmd": "stop"}` to stop motors
+  - `{"cmd": "ping"}` to test connection
+
+### Testing
+```bash
+# Test ESP8266 communication
+cd pi/
+python test_esp8266_simple.py
+
+# Test with specific port
+python test_esp8266_simple.py /dev/ttyUSB0
+```
