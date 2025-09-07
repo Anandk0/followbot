@@ -83,19 +83,11 @@ def main():
             def close(self): pass
         motors = MockMotorDriver()
     else:
-        try:
-            motors = ESP8266MotorDriver(port, baud)
-            if motors.is_connected():
-                print(f"ESP8266 motor driver connected on {port}")
-            else:
-                raise ConnectionError("ESP8266 not responding")
-        except Exception as e:
-            print(f"ESP8266 connection failed: {e}")
-            print("Using mock motor driver")
-            class MockMotorDriver:
-                def send(self, cmd): print(f"MOCK MOTOR: {cmd}")
-                def close(self): pass
-            motors = MockMotorDriver()
+        # Force ESP8266 connection - no fallback to mock
+        motors = ESP8266MotorDriver(port, baud)
+        print(f"ESP8266 motor driver initialized on {port}")
+        if not motors.is_connected():
+            print("WARNING: ESP8266 not responding, but continuing...")
     
     ctl = Controller(cfg, pid, bno, motors)
 
