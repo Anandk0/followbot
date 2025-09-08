@@ -1,14 +1,12 @@
-import cv2, time, yaml, os, subprocess, threading, signal
+import cv2, time, yaml, os
 import numpy as np
 from detector_movenet import MoveNetDetector
 from tracker import SmoothTracker
 from bno055_reader import BNO055Reader
 from pid import PID
 from esp8266_motor_driver import ESP8266MotorDriver
-from wifi_motor_driver import WiFiMotorDriver
 from control import Controller
 from utils import draw_vis
-from mediapipe_camera import MediaPipeCamera
 
 def load_cfg(path):
     import os
@@ -18,31 +16,52 @@ def load_cfg(path):
     with open(path,'r') as f: return yaml.safe_load(f)
 
 def setup_camera(cfg):
-    """Setup MediaPipe camera for fast capture"""
+    """Setup Pi Camera with proper support"""
     w, h = cfg["camera"]["width"], cfg["camera"]["height"]
     
+    # Try picamera2 first (modern Pi Camera)
     try:
-        camera = MediaPipeCamera(w, h, 30)
-        return camera, None, False
+        from picamera2 import Picamera2
+        picam2 = Picamera2()
+        config = picam2.create_preview_configuration(main={"size": (w, h)})
+        picam2.configure(config)
+        picam2.start()
+        print(f"Pi Camera (picamera2) started: {w}x{h}")
+        return picam2, None, "picamera2"
+    except ImportError:
+        print("picamera2 not available")
     except Exception as e:
-        print(f"MediaPipe camera failed: {e}")
-        
-        # Fallback to libcamera-vid
-        cmd = ['libcamera-vid', '--inline', '--nopreview', f'--width={w}', f'--height={h}', 
-               '--framerate=25', '--timeout=0', '--codec=mjpeg', '--output=-']
-        try:
-            camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            print(f"Fallback camera started: {w}x{h}@25fps")
-            return None, camera_proc, True
-        except Exception as e2:
-            print(f"All cameras failed: {e2}")
-            raise RuntimeError("No camera available")
+        print(f"picamera2 failed: {e}")
+    
+    # Try legacy picamera
+    try:
+        import picamera
+        import picamera.array
+        camera = picamera.PiCamera()
+        camera.resolution = (w, h)
+        camera.framerate = 30
+        print(f"Pi Camera (legacy) started: {w}x{h}")
+        return camera, None, "picamera"
+    except ImportError:
+        print("picamera not available")
+    except Exception as e:
+        print(f"picamera failed: {e}")
+    
+    # Fallback to OpenCV
+    cap = cv2.VideoCapture(0)
+    if cap.isOpened():
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+        print(f"Using OpenCV camera: {w}x{h}")
+        return cap, None, "opencv"
+    
+    raise RuntimeError("No camera available")
 
 def main():
     cfg = load_cfg("config.yaml")
     
     try:
-        camera, camera_proc, use_subprocess = setup_camera(cfg)
+        camera, camera_proc, camera_type = setup_camera(cfg)
     except RuntimeError as e:
         print(e)
         return
@@ -94,71 +113,37 @@ def main():
         frame_count = 0
         frame = None
         camera_error_count = 0
-        last_restart = 0
         
         while True:
-            if use_subprocess:
-                # Read MJPEG frame from libcamera-vid (fallback)
-                buffer = b''
-                frame = None
-                while True:
-                    try:
-                        chunk = camera_proc.stdout.read(1024)
-                        if not chunk or camera_proc.poll() is not None:
-                            break
-                    except (BrokenPipeError, OSError):
-                        print("Camera process terminated")
-                        break
-                    buffer += chunk
-                    
-                    # Find JPEG start
-                    start = buffer.find(b'\xff\xd8')
-                    if start == -1:
-                        continue
-                        
-                    # Find JPEG end
-                    end = buffer.find(b'\xff\xd9', start + 2)
-                    if end == -1:
-                        continue
-                        
-                    # Extract JPEG frame
-                    jpeg_data = buffer[start:end+2]
-                    buffer = buffer[end+2:]
-                    
-                    # Decode JPEG
-                    frame = cv2.imdecode(np.frombuffer(jpeg_data, dtype=np.uint8), cv2.IMREAD_COLOR)
-                    if frame is not None:
-                        break
-                        
-                if frame is None:
-                    camera_error_count += 1
-                    if camera_error_count > 10:
-                        print("Too many camera errors, restarting...")
-                        if time.time() - last_restart > 5:
-                            try:
-                                camera_proc.terminate()
-                                camera_proc.wait(timeout=2)
-                            except:
-                                pass
-                            camera, camera_proc, use_subprocess = setup_camera(cfg)
-                            camera_error_count = 0
-                            last_restart = time.time()
-                    continue
-                else:
-                    camera_error_count = 0
+            # Capture frame based on camera type
+            if camera_type == "picamera2":
+                frame = camera.capture_array()
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            elif camera_type == "picamera":
+                import picamera.array
+                with picamera.array.PiRGBArray(camera) as output:
+                    camera.capture(output, 'bgr')
+                    frame = output.array
+            elif camera_type == "opencv":
+                ret, frame = camera.read()
+                if not ret:
+                    frame = None
             else:
-                # Use MediaPipe camera (fast)
-                frame = camera.read_frame()
-                if frame is None:
-                    camera_error_count += 1
-                    if camera_error_count > 5:
-                        print("MediaPipe camera error, restarting...")
+                frame = None
+            
+            if frame is None:
+                camera_error_count += 1
+                if camera_error_count > 5:
+                    print(f"Camera error, restarting {camera_type}...")
+                    if camera_type in ["picamera2", "picamera"]:
+                        camera.close() if hasattr(camera, 'close') else None
+                    elif camera_type == "opencv":
                         camera.release()
-                        camera, camera_proc, use_subprocess = setup_camera(cfg)
-                        camera_error_count = 0
-                    continue
-                else:
+                    camera, camera_proc, camera_type = setup_camera(cfg)
                     camera_error_count = 0
+                continue
+            else:
+                camera_error_count = 0
                     
             frame_count += 1
             if frame_count % 60 == 1:  # Reduce debug output
@@ -193,18 +178,13 @@ def main():
     finally:
         motors.close()
         if 'camera' in locals() and camera:
-            camera.release()
-        if 'camera_proc' in locals() and camera_proc:
-            try:
-                if camera_proc.poll() is None:
-                    camera_proc.terminate()
-                    try:
-                        camera_proc.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        camera_proc.kill()
-                        camera_proc.wait()
-            except (subprocess.TimeoutExpired, ProcessLookupError) as e:
-                print(f"Camera cleanup error: {e}")
+            if camera_type == "picamera2":
+                camera.stop()
+                camera.close()
+            elif camera_type == "picamera":
+                camera.close()
+            elif camera_type == "opencv":
+                camera.release()
         cv2.destroyAllWindows()
 
 if __name__ == "__main__":
